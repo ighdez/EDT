@@ -62,8 +62,8 @@ Att10 = {	'name':		'J',
             'par':		[-.02,-.06]}
 
 # Set conditions
-cond = 	[	"D>2,H>0 and I>0 and J>0",
-            "D<3,H<2 and I<2 and J<2"]
+cond = 	[	"if D>2, H>0 and I>0 and J>0",
+            "if D<3, H<2 and I<2 and J<2"]
 
 # Merge all attributes in a single list
 Attlist = [Att1,Att2,Att3,Att4,Att5,Att6,Att7,Att8,Att9,Att10]
@@ -79,7 +79,7 @@ options = 	{	'optout': 1,
                 'seed': 666,
                 # 'iterlim': 0,
                 # 'noimprovlim': 0,
-                'timelim': 1,
+                'timelim': 0.1,
                 'nblocks': 9,
                 'cond': cond}
 

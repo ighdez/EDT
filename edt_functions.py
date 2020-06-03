@@ -1,9 +1,14 @@
 # EDT functions
 # Written by José Ignacio Hernández
-# May 2020
+# June 2020
 
 # Changelog:
-# v0.1: Rewrite all the code from zero
+# -----------------------------------------------
+# v0.2: - Several changes in condition generation
+#       - Bug fixes and code improvements
+# -----------------------------------------------
+# v0.1: - Rewrite all the code from zero
+# -----------------------------------------------
 
 # Load packages
 import pandas as pd
@@ -54,6 +59,8 @@ def effdesign(ATTLIST,NALT,NCS,OPTS):
         CODS = CODS + [ATTLIST[k]['coding']]
         PAR = PAR + ATTLIST[k]['par']
 
+    target_atts = np.arange(0,len(NAMES))
+
     # Add the ASC parameter if present
     if len(ASC) > 0:
         PAR = PAR + ASCPAR
@@ -85,7 +92,7 @@ def effdesign(ATTLIST,NALT,NCS,OPTS):
     ############################################################
 
     # Execute Swapping algorithm
-    bestdes, bestderr, best_t, elapsed_time = swapalg(desmat,initd,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM,NOIMPROVLIM,TIMELIM)
+    bestdes, bestderr, best_t, elapsed_time = swapalg(desmat,initd,target_atts,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM,NOIMPROVLIM,TIMELIM)
 
     # Compute utility balance ratio
     ub = imat_ubalance(desmat0,CODS,PAR,NATT,NALT,NCS,NRUNS,OPTOUT,ASC,ubalance=True)
@@ -138,7 +145,7 @@ def effdesign(ATTLIST,NALT,NCS,OPTS):
     return(di)
 
 # Swapping algorithm function
-def swapalg(DES,INITD,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM,NOIMPROVLIM,TIMELIM):
+def swapalg(DES,INITD,TARGET_ATTS,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM,NOIMPROVLIM,TIMELIM):
     
     # Lock design matrix
     desmat = DES.copy()
@@ -148,20 +155,24 @@ def swapalg(DES,INITD,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM
         condlist = []
         # Generate condition list
         for i in range(0,len(COND)):
-            condlist = condlist + condgen(NAMES,COND[i],init=False)
+            condlist = condlist + [condgen(NAMES,"swapdes",COND[i],init=False)]
 
     # Generate matrix of all possible permutations
     combmat = np.array(list(itt.combinations(range(1,NRUNS+1), 2))) - 1
 
-    # Start stopwatch (falta)
-    a = time.time()
-    b = time.time()
+    # Start stopwatch
+    t0 = time.time()
+    t1 = time.time()
+
+    difftime = 0
 
     # Initialize algorithm parameters
-    i = 0
+    i = np.random.choice(TARGET_ATTS,1)[0]
     t = 0
     ni = 0
+    improv = 0
     iterd = INITD
+    newd = INITD
 
     # Start algorithm
     while True:
@@ -170,48 +181,53 @@ def swapalg(DES,INITD,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM
         t = t+1
         
         # If one stopping criterion is satisfied, break!
-        if ni >= NOIMPROVLIM or t >= ITERLIM or (b-a)/60 >= TIMELIM:
+        if ni >= NOIMPROVLIM or t >= ITERLIM or (difftime)/60 >= TIMELIM:
             break
         
         # Take a random swap
-        pairswap = combmat[np.random.choice(combmat.shape[0],1)][0]
+        pairswap = combmat[np.random.choice(len(combmat),1)][0]
         
-        # If attribute levels differ, do the swap.
-        if desmat[pairswap[0],i] != desmat[pairswap[1],i]:
+        # Check if attribute levels differ
+        check_difflevels = desmat[pairswap[0],i] != desmat[pairswap[1],i]
+
+        # If attribute levels differ, do the swap and check for conditions (if defined)
+        if check_difflevels:
             swapdes = desmat.copy()
             swapdes[pairswap[0],i] = desmat[pairswap[1],i]
             swapdes[pairswap[1],i] = desmat[pairswap[0],i]
             
-            # If conditions are defined, check if the swap satisfies them
+            # Check if conditions are satisfied after a swap
+            check_satisfied_conds = True  
+            
+            # If conditions are defined, this section will check that are satisfied, and rewrite 'check_satisfied_conds' if neccesary
             if len(COND) > 0:
             
                 # Generate check vector
-                check = []
-                for co in range(0,len(condlist)):
-                    check = check + [np.any(np.logical_and(eval(condlist[co][0]),np.logical_not(eval(condlist[co][1]))))]
+                condcheck = []
+
+                # Loop among conditions
+                for j in range(0,len(condlist)):
+                    for c in range(0,len(condlist[j][1])):
+                        test = np.logical_or(np.logical_not(eval(condlist[j][0])),eval(condlist[j][1][c]))
+                        condcheck = condcheck + [np.all(test)]
                 
-                # If all conditions are satisfied, compute D-error
-                if not(np.any(check)):
-                    newd = imat_ubalance(swapdes,CODS,PAR,NATT,NALT,NCS,NRUNS,OPTOUT,ASC)
-                    
-                #...else, keep original D-error
-                else:
-                    newd = iterd.copy()
-            
-            #...else if conditions are not defined, pass directly to D-error computation
-            else:
+                # Rewrite 'check_satisfied_conds'
+                check_satisfied_conds = np.all(condcheck)
+
+            # If all conditions are satisfied, compute D-error
+            if check_satisfied_conds:
                 newd = imat_ubalance(swapdes,CODS,PAR,NATT,NALT,NCS,NRUNS,OPTOUT,ASC)
 
         # ...else if they do not differ, keep the D-error
         else:
             newd = iterd.copy()
             
-        # If the swap made an improvement, keep the design.
-        # Else, pass to the next attribute
+        # If the swap made an improvement, keep the design and update progress bar
         if newd < iterd:
             desmat = swapdes.copy()
             iterd = newd.copy()
             ni = 0
+            improv = improv + 1
             
             # Add this lines for GUI version (update text bars)
             # self.line_DERR.setText(str(round(iterd,6)))
@@ -220,19 +236,17 @@ def swapalg(DES,INITD,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM
             # self.line_ELAPSED.setText(str(datetime.timedelta(seconds=b-a))[:7])
             
             # Update progress bar
-            print('Optimizing. Press ESC to stop. / ' + 'Elapsed: ' + str(datetime.timedelta(seconds=b-a))[:7] + ' / D-Error: ' + str(round(iterd,6)),end='\r')
-            
+            print('Optimizing. Press ESC to stop. / ' + 'Elapsed: ' + str(datetime.timedelta(seconds=difftime))[:7] + '/ Improv.: ' + str(improv) + ' / D-Error: ' + str(round(iterd,6)),end='\r')
+
+        # ...else, pass to a random attribute and increment the 'no improvement' counter by 1.
         else:
-            i = i+1
+            i = np.random.choice(TARGET_ATTS,1)[0]
             ni = ni+1
         
-        # If the algorithm reach the attribute limit, reset to attribute 1
-        if i > NATT-1:
-            i = 0
-        
         # Update progress bar each second
-        if (b-a)%1 == 0:
-            print('Optimizing. Press ESC to stop. / ' + 'Elapsed: ' + str(datetime.timedelta(seconds=b-a))[:7] + ' / D-Error: ' + str(round(iterd,6)),end='\r')
+        if (difftime)%1 < 0.1:
+            print('Optimizing. Press ESC to stop. / ' + 'Elapsed: ' + str(datetime.timedelta(seconds=difftime))[:7] + '/ Improv.: ' + str(improv) + ' / D-Error: ' + str(round(iterd,6)),end='\r')
+
             # Add this lines for GUI version (update text bars)
             # self.line_DERR.setText(str(round(iterd,6)))
             # self.line_ITER.setText(str(t))
@@ -244,8 +258,8 @@ def swapalg(DES,INITD,NATT,NALT,NCS,NRUNS,CODS,PAR,OPTOUT,ASC,NAMES,COND,ITERLIM
         #     if ord(msvcrt.getch()) == 27:
         #         break
         
-        b = time.time()
-        difftime = b - a
+        t1 = time.time()
+        difftime = t1-t0
         # In GUI version, this part prevents window freezing
         # QtWidgets.qApp.processEvents()
     
@@ -392,18 +406,45 @@ def initdesign(ATTLIST,LEVS,NATT,NRUNS,NAMES,COND):
         
         # Generate condition list
         for i in range(0,len(COND)):
-            condlist = condlist + [condgen(NAMES,COND[i])]
-        
+            condlist = condlist + [condgen(NAMES,"desmat",COND[i])]
+
         # Apply conditions
-        for k in range(0,len(COND)):
-            for p in range(0,len(condlist[k])):
-                samplevec = np.array(ATTLIST[condlist[k][p][1]]['levels'])
-                condition = 'samplevec' + str(condlist[k][p][2]) + str(condlist[k][p][3])
-                samplevec = samplevec[eval(condition)].copy()
+        for j in range(0,len(condlist)):
+            for i in range(0,len(desmat)):
+
+                # Create test object
+                test = not(eval(condlist[j][0])) or eval(condlist[j][1])
                 
-                for i in range(0,NRUNS):
-                    if eval(condlist[k][p][0][0]) and not(eval(condlist[k][p][0][1])):
-                        desmat[i,int(condlist[k][p][1])] = np.random.choice(samplevec,1)
+                # If the statement is true, then replace the value that doesn't satisfy the statement
+                if not(test):
+                    
+                    # For multiple "then" statements
+                    if len(condlist[j][2])>1:
+
+                        # Create sample vector
+                        samplevec = []
+
+                        for k in range(0,len(condlist[j][2])):
+                            samp = np.array(ATTLIST[condlist[j][2][k]]['levels'])
+                            condition = 'samp' + str(condlist[j][3][k]) + str(condlist[j][4][k])
+                            samplevec = samplevec + [samp[eval(condition)]]
+
+                        # Replace values until the statement is true
+                        while not(test):
+                            for k in range(0,len(samplevec)):
+                                desmat[i,int(condlist[j][2][k])] = np.random.choice(samplevec[k],1)
+                            
+                            test = not(eval(condlist[j][0])) or eval(condlist[j][1])
+                    
+                    # For single statement
+                    else: 
+                        samp = np.array(ATTLIST[condlist[j][2][0]]['levels'])
+                        condition = 'samp' + str(condlist[j][3][0]) + str(condlist[j][4][0])
+                        samplevec = samp[eval(condition)]
+
+                        while not(test):
+                            desmat[i,int(condlist[j][2][0])] = np.random.choice(samplevec,1)                                
+                            test = not(eval(condlist[j][0])) or eval(condlist[j][1])
 
     return(desmat)
 
@@ -552,45 +593,56 @@ def cross(x,y):
     return(np.array(tab))
 
 # Condition generation function
-def condgen(NAMES,cc,init=True):
+def condgen(NAMES,d,cc,init=True):
     
-    # Split if > then conditions from the comma expression
-    a0 = cc.split(',')
-    b0 = a0[0]
-    c0 = a0[1]
-    
-    # Match names with attribute columns
-    a1 = np.where(np.isin(NAMES,re.sub('[^A-Za-z]+','',b0)))[0]
-    b1 = re.sub('[^<>=]+','',b0)
-    c1 = re.sub('[^0-9]+','',b0)
-    
-    c0 = c0.split('and')
-    
-    for i in range(0,len(c0)):
-        locals()['a' + str(i+2)] = np.where(np.isin(NAMES,re.sub('[^A-Za-z]+','',c0[i])))[0]
-        locals()['b' + str(i+2)] = re.sub('[^<>=]+','',c0[i])
-        locals()['c' + str(i+2)] = re.sub('[^0-9]+','',c0[i])
+    delimiters = '<=|>=|==|<|>'
+
+    # Split conditions
+    if_part = cc.split(',')[0].replace('if ','')
+    if_pos = re.split(delimiters,if_part)[0].replace(' ','')
+    if_pos = np.where(np.isin(NAMES,if_pos))[0][0]
+    if_sign = ''.join(re.findall(delimiters,if_part))
+    if_value = int(re.split(delimiters,if_part)[1].replace(' ',''))
+
+    then_part = cc.split(',')[1].split('and')
 
     if init:
-        clist = []
-        
-        for i in range(0,len(c0)):
-            clist = clist + [	[	[	'desmat[i' + ',' + str(a1[0]) + ']' + str(b1) + str(c1) ,
-                                        'desmat[i' + ',' + str(locals()['a' + str(i+2)][0]) + ']' + str(locals()['b' + str(i+2)]) + str(locals()['c' + str(i+2)])
-                                    ],
-                                    locals()['a' + str(i+2)][0],
-                                    locals()['b' + str(i+2)],
-                                    int(locals()['c' + str(i+2)])
-                                ]
-                            ]
-        
+        # Create part 1 of condition expression
+        part1 = str(d) + '[i,' + str(if_pos) + ']' + if_sign + str(if_value)
+
+        # Create part 2 of condition expression
+        then_att = re.split(delimiters,then_part[0])[0].replace(' ','')
+        then_pos = [np.where(np.isin(NAMES,then_att))[0][0]]
+        then_sign = [''.join(re.findall(delimiters,then_part[0]))]
+        then_value = [int(re.split(delimiters,then_part[0])[1].replace(' ',''))]
+
+        part2 = str(d) + '[i,' + str(then_pos[0]) + ']' + then_sign[0] + str(then_value[0])
+
+        # If the second part of the "then" expression contains more than 1 condition, then join
+        if len(then_part) > 1:
+            for i in range(1,len(then_part)):
+                then_att = re.split(delimiters,then_part[i])[0].replace(' ','')
+                then_pos = then_pos + [np.where(np.isin(NAMES,then_att))[0][0]]
+                then_sign = then_sign + [''.join(re.findall(delimiters,then_part[i]))]
+                then_value = then_value + [int(re.split(delimiters,then_part[i])[1].replace(' ',''))]
+
+                part2 = part2 + ' and ' + str(d) + '[i,' + str(then_pos[i]) + ']' + then_sign[i] + str(then_value[i])
+
+        clist = [part1,part2,then_pos,then_sign,then_value]
+
     else:
-        clist = []
-        
-        for i in range(0,len(c0)):
-            clist = clist + [	[	'swapdes[:' + ',' + str(a1) + ']' + str(b1) + str(c1),
-                                    'swapdes[:' + ',' + str(locals()['a' + str(i+2)]) + ']' + str(locals()['b' + str(i+2)]) + str(locals()['c' + str(i+2)])
-                                ]
-                            ]
-    
+        # Create part 1 of condition expression
+        part1 = str(d) + '[:,' + str(if_pos) + ']' + if_sign + str(if_value)
+
+        # Create part 2 of condition expression
+        part2 = []
+        for i in range(0,len(then_part)):
+            then_att = re.split(delimiters,then_part[i])[0].replace(' ','')
+            then_pos = np.where(np.isin(NAMES,then_att))[0][0]
+            then_sign = ''.join(re.findall(delimiters,then_part[i]))
+            then_value = int(re.split(delimiters,then_part[i])[1].replace(' ',''))
+
+            part2 = part2 + [str(d) + '[:,' + str(then_pos) + ']' + then_sign + str(then_value)]
+        clist = [part1,part2]
+
     return(clist)
