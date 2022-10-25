@@ -396,7 +396,7 @@ def initdesign(ATTLIST,LEVS,NATT,NRUNS,NAMES,COND):
 
     # Populate the initial design matrix
     for k in range(0,NATT):
-        dd = np.repeat(ATTLIST[k]['levels'],NRUNS/LEVS[k])
+        dd = np.array((ATTLIST[k]['levels'] * int(np.ceil(NRUNS/LEVS[k])))[:NRUNS])
         np.random.shuffle(dd)
         desmat[:,k] = dd
 
@@ -515,10 +515,10 @@ def checkatts(ATTLIST,NALT,NCS,OPTS):
             return(mess,code)
 
         # Check if NRUNS is divisible by number of attribute levels
-        if NRUNS%len(ATTLIST[k]['levels']) != 0:
-            mess = "Error: No. of Choice sets times No. of alternatives is not divisible by number of levels of attribute " + str(k+1) + "."
-            code = 1
-            return(mess,code)
+        # if NRUNS%len(ATTLIST[k]['levels']) != 0:
+        #     mess = "Error: No. of Choice sets times No. of alternatives is not divisible by number of levels of attribute " + str(k+1) + "."
+        #     code = 1
+        #     return(mess,code)
 
 
         # Check if number of prior parameters are well-defined (one less than number of levels)
