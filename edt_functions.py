@@ -113,7 +113,7 @@ def effdesign(ATTLIST,NALT,NCS,OPTS):
         altrow.shape = (NRUNS+NCS,1)
 
     else:
-        grprow = np.repeat(np.arange(1,NCS),NALT)
+        grprow = np.repeat(np.arange(1,NCS+1),NALT)
         grprow.shape = (NRUNS,1)
         altrow = np.tile(np.arange(1,NALT+1),NCS)
         altrow.shape = (NRUNS,1)
