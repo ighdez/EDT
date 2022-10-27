@@ -595,7 +595,7 @@ def cross(x,y):
 # Condition generation function
 def condgen(NAMES,d,cc,init=True):
     
-    delimiters = '<=|>=|==|<|>'
+    delimiters = '<=|>=|==|<|>|!='
 
     # Split conditions
     if_part = cc.split(',')[0].replace('if ','')
